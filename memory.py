@@ -63,16 +63,19 @@ class MemoryManager:
 
     async def load(self):
         """Pull facts and today's conversation from Dropbox on startup."""
-        saved_facts = await self._async(self._download_json, FACTS_PATH, None)
-        if saved_facts:
-            for k, v in DEFAULT_FACTS.items():
-                saved_facts.setdefault(k, list(v))
-            self.facts = saved_facts
+        try:
+            saved_facts = await self._async(self._download_json, FACTS_PATH, None)
+            if saved_facts:
+                for k, v in DEFAULT_FACTS.items():
+                    saved_facts.setdefault(k, list(v))
+                self.facts = saved_facts
 
-        convo_path = f"{DROPBOX_BASE}/conversations/{self.today_str}.json"
-        history = await self._async(self._download_json, convo_path, [])
-        self.conversation_history = history[-60:] if history else []
-        self._message_count = len(self.conversation_history)
+            convo_path = f"{DROPBOX_BASE}/conversations/{self.today_str}.json"
+            history = await self._async(self._download_json, convo_path, [])
+            self.conversation_history = history[-60:] if history else []
+            self._message_count = len(self.conversation_history)
+        except Exception as e:
+            print(f"[Dropbox] load failed, starting fresh: {e}")
 
     async def save(self):
         convo_path = f"{DROPBOX_BASE}/conversations/{self.today_str}.json"
