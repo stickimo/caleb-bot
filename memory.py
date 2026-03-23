@@ -1,0 +1,124 @@
+import json
+from datetime import date
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
+import dropbox
+from dropbox.exceptions import ApiError
+
+DROPBOX_BASE = "/CalebBot"
+FACTS_PATH = f"{DROPBOX_BASE}/memory/facts.json"
+
+DEFAULT_FACTS = {
+    "about_caleb": [
+        "Geotechnical field/lab tech in the San Luis Valley, CO",
+        "Building a hyperadobe compound on his own land — long-term project",
+        "Engaged with Advaita Vedanta: Adyashanti, Robert Adams, Shankara",
+        "Zen practice background",
+    ],
+    "projects": [],
+    "preferences": [],
+    "notes": [],
+}
+
+
+class MemoryManager:
+    def __init__(self, dropbox_refresh_token: str, app_key: str, app_secret: str):
+        self.dbx = dropbox.Dropbox(
+            oauth2_refresh_token=dropbox_refresh_token,
+            app_key=app_key,
+            app_secret=app_secret,
+        )
+        self._executor = ThreadPoolExecutor(max_workers=2)
+        self.facts: dict = {k: list(v) for k, v in DEFAULT_FACTS.items()}
+        self.conversation_history: list = []
+        self.today_str = str(date.today())
+        self._message_count = 0
+
+    # ── Dropbox helpers ──────────────────────────────────────────────────────
+
+    def _download_json(self, path: str, default=None):
+        try:
+            _, res = self.dbx.files_download(path)
+            return json.loads(res.content)
+        except ApiError:
+            return default
+
+    def _upload_json(self, path: str, data):
+        try:
+            content = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+            self.dbx.files_upload(
+                content,
+                path,
+                mode=dropbox.files.WriteMode.overwrite,
+                mute=True,
+            )
+        except Exception as e:
+            print(f"[Dropbox] upload error ({path}): {e}")
+
+    async def _async(self, fn, *args):
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._executor, fn, *args)
+
+    # ── Load / save ──────────────────────────────────────────────────────────
+
+    async def load(self):
+        """Pull facts and today's conversation from Dropbox on startup."""
+        saved_facts = await self._async(self._download_json, FACTS_PATH, None)
+        if saved_facts:
+            for k, v in DEFAULT_FACTS.items():
+                saved_facts.setdefault(k, list(v))
+            self.facts = saved_facts
+
+        convo_path = f"{DROPBOX_BASE}/conversations/{self.today_str}.json"
+        history = await self._async(self._download_json, convo_path, [])
+        self.conversation_history = history[-60:] if history else []
+        self._message_count = len(self.conversation_history)
+
+    async def save(self):
+        convo_path = f"{DROPBOX_BASE}/conversations/{self.today_str}.json"
+        await asyncio.gather(
+            self._async(self._upload_json, FACTS_PATH, self.facts),
+            self._async(self._upload_json, convo_path, self.conversation_history),
+        )
+
+    async def save_facts(self):
+        await self._async(self._upload_json, FACTS_PATH, self.facts)
+
+    # ── Memory ops ───────────────────────────────────────────────────────────
+
+    def add_message(self, role: str, content: str):
+        self.conversation_history.append({"role": role, "content": content})
+        self._message_count += 1
+
+    def add_fact(self, fact: str, category: str = "notes") -> bool:
+        bucket = self.facts.setdefault(category, [])
+        if fact not in bucket:
+            bucket.append(fact)
+            return True
+        return False
+
+    def remove_fact(self, fact: str) -> bool:
+        for bucket in self.facts.values():
+            if isinstance(bucket, list) and fact in bucket:
+                bucket.remove(fact)
+                return True
+        return False
+
+    def get_memory_text(self) -> str:
+        lines = []
+        for cat, items in self.facts.items():
+            if items:
+                lines.append(f"[{cat.replace('_', ' ').title()}]")
+                lines.extend(f"- {item}" for item in items)
+        return "\n".join(lines)
+
+    def get_context_messages(self, n: int = 20) -> list:
+        return self.conversation_history[-n:]
+
+    def clear_today(self):
+        self.conversation_history = []
+        self._message_count = 0
+
+    @property
+    def should_extract(self) -> bool:
+        return self._message_count > 0 and self._message_count % 15 == 0

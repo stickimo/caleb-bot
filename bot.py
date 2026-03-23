@@ -1,0 +1,170 @@
+import os
+import logging
+from dotenv import load_dotenv
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
+from memory import MemoryManager
+from claude_client import ClaudeClient
+
+load_dotenv()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
+ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+DROPBOX_REFRESH_TOKEN = os.environ["DROPBOX_REFRESH_TOKEN"]
+DROPBOX_APP_KEY = os.environ["DROPBOX_APP_KEY"]
+DROPBOX_APP_SECRET = os.environ["DROPBOX_APP_SECRET"]
+ALLOWED_USER_ID = os.getenv("ALLOWED_USER_ID")  # your Telegram numeric user ID
+
+memory = MemoryManager(DROPBOX_REFRESH_TOKEN, DROPBOX_APP_KEY, DROPBOX_APP_SECRET)
+claude: ClaudeClient | None = None
+
+
+def allowed(update: Update) -> bool:
+    if not ALLOWED_USER_ID:
+        return True
+    return str(update.effective_user.id) == ALLOWED_USER_ID
+
+
+# ── Handlers ─────────────────────────────────────────────────────────────────
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+
+    await context.bot.send_chat_action(update.effective_chat.id, "typing")
+    reply = await claude.chat(update.message.text)
+    await update.message.reply_text(reply)
+    await memory.save()
+
+    if memory.should_extract:
+        facts = await claude.extract_facts()
+        if facts:
+            await memory.save_facts()
+            logger.info("Auto-extracted facts: %s", facts)
+
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    await update.message.reply_text("Ready.")
+
+
+async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    text = memory.get_memory_text()
+    await update.message.reply_text(text or "Memory is empty.")
+
+
+async def cmd_remember(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /remember <fact>
+    /remember projects <fact>
+    /remember preferences <fact>
+    /remember notes <fact>
+    """
+    if not allowed(update):
+        return
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Usage: /remember [category] fact\nCategories: projects, preferences, notes"
+        )
+        return
+
+    known = {"projects", "preferences", "notes", "about_caleb"}
+    if args[0] in known and len(args) > 1:
+        category, fact = args[0], " ".join(args[1:])
+    else:
+        category, fact = "notes", " ".join(args)
+
+    added = memory.add_fact(fact, category)
+    await memory.save_facts()
+    await update.message.reply_text("Saved." if added else "Already in memory.")
+
+
+async def cmd_forget(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /forget <exact fact text>")
+        return
+    fact = " ".join(context.args)
+    removed = memory.remove_fact(fact)
+    if removed:
+        await memory.save_facts()
+        await update.message.reply_text("Removed.")
+    else:
+        await update.message.reply_text("Fact not found — use /memory to see exact text.")
+
+
+async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clear conversation history (not facts)."""
+    if not allowed(update):
+        return
+    memory.clear_today()
+    await memory.save()
+    await update.message.reply_text("Conversation cleared.")
+
+
+async def cmd_extract(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manually trigger fact extraction from recent conversation."""
+    if not allowed(update):
+        return
+    await context.bot.send_chat_action(update.effective_chat.id, "typing")
+    facts = await claude.extract_facts()
+    if facts:
+        await memory.save_facts()
+        lines = [f"[{cat}] {item}" for cat, items in facts.items() for item in items]
+        await update.message.reply_text("Extracted:\n" + "\n".join(lines))
+    else:
+        await update.message.reply_text("Nothing new to extract.")
+
+
+# ── Init ─────────────────────────────────────────────────────────────────────
+
+
+async def post_init(application: Application):
+    global claude
+    logger.info("Loading memory from Dropbox...")
+    await memory.load()
+    claude = ClaudeClient(ANTHROPIC_API_KEY, memory)
+    logger.info("Bot ready.")
+
+
+def main():
+    app = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
+
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("memory", cmd_memory))
+    app.add_handler(CommandHandler("remember", cmd_remember))
+    app.add_handler(CommandHandler("forget", cmd_forget))
+    app.add_handler(CommandHandler("clear", cmd_clear))
+    app.add_handler(CommandHandler("extract", cmd_extract))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    logger.info("Starting polling...")
+    app.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    main()
