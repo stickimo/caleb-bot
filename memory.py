@@ -1,5 +1,8 @@
 import json
+import logging
 from datetime import date
+
+logger = logging.getLogger(__name__)
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 import dropbox
@@ -53,8 +56,9 @@ class MemoryManager:
                 mode=dropbox.files.WriteMode.overwrite,
                 mute=True,
             )
+            logger.info("Dropbox upload OK: %s", path)
         except Exception as e:
-            print(f"[Dropbox] upload error ({path}): {e}")
+            logger.error("Dropbox upload error (%s): %s", path, e)
 
     async def _async(self, fn, *args):
         loop = asyncio.get_event_loop()
