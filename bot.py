@@ -47,12 +47,8 @@ REMEMBER_TRIGGERS = (
     "make a note",
 )
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update):
-        return
-
-    user_text = update.message.text
-    wants_save = any(t in user_text.lower() for t in REMEMBER_TRIGGERS)
+async def _process(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    wants_save = any(t in text.lower() for t in REMEMBER_TRIGGERS)
 
     async def keep_typing():
         while True:
@@ -61,10 +57,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     typing_task = asyncio.create_task(keep_typing())
     try:
-        reply = await claude.chat(user_text)
+        reply = await claude.chat(text)
     finally:
         typing_task.cancel()
+
     await update.message.reply_text(reply)
+
     if memory.should_save_conversation:
         await memory.save_conversation()
 
@@ -73,6 +71,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if facts:
             await memory.save_facts()
             logger.info("Extracted facts: %s", facts)
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    await _process(update, context, update.message.text)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -174,10 +178,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Echo transcription so you know what it heard, then respond
     await update.message.reply_text(f"_{transcribed}_", parse_mode="Markdown")
-
-    # Reuse text message handler logic
-    update.message.text = transcribed
-    await handle_message(update, context)
+    await _process(update, context, transcribed)
 
 
 # ── Init ─────────────────────────────────────────────────────────────────────
