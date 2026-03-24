@@ -97,11 +97,18 @@ class ClaudeClient:
             if response.stop_reason == "tool_use":
                 tool_block = next(b for b in response.content if b.type == "tool_use")
                 search_results = await self._web_search(tool_block.input["query"])
-                # Serialize content blocks to dicts for reliable API round-tripping
-                assistant_content = [
-                    b.model_dump() if hasattr(b, "model_dump") else b
-                    for b in response.content
-                ]
+                # Manually serialize to avoid model_dump() producing unexpected fields
+                assistant_content = []
+                for b in response.content:
+                    if b.type == "tool_use":
+                        assistant_content.append({
+                            "type": "tool_use",
+                            "id": b.id,
+                            "name": b.name,
+                            "input": b.input,
+                        })
+                    elif b.type == "text":
+                        assistant_content.append({"type": "text", "text": b.text})
                 messages.append({"role": "assistant", "content": assistant_content})
                 messages.append({
                     "role": "user",
