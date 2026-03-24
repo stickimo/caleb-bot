@@ -94,7 +94,7 @@ async def cmd_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if err:
         await update.message.reply_text(err)
     elif docs:
-        await update.message.reply_text("Docs available:\n" + "\n".join(f"- {d}" for d in docs))
+        await update.message.reply_text("Docs available:\n" + "\n".join(f"/read {d}" for d in docs))
     else:
         await update.message.reply_text("No documents found in /CalebBot/documents/")
 
@@ -152,7 +152,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         "DOCUMENTS\n"
-        "/docs — list documents in Dropbox\n"
+        "/docs — list available documents\n"
         "/read <filename> — load a document into the conversation\n"
         "\n"
         "INFO\n"
@@ -168,10 +168,11 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "\n"
         "MANAGE\n"
         "/remember [category] fact — save a fact\n"
+        "    categories: projects, preferences, notes\n"
         "/forget <exact fact> — remove a fact\n"
-        "/wipe <category> — clear a category\n"
+        "/wipe <category> — clear an entire category\n"
         "/extract — trigger fact extraction\n"
-        "/clear — wipe today's conversation"
+        "/clear — wipe today's conversation history"
     )
 
 
