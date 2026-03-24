@@ -32,7 +32,7 @@ class MemoryManager:
             app_key=app_key,
             app_secret=app_secret,
         )
-        self._executor = ThreadPoolExecutor(max_workers=2)
+        self._executor = ThreadPoolExecutor(max_workers=1)
         self.facts: dict = {k: list(v) for k, v in DEFAULT_FACTS.items()}
         self.conversation_history: list = []
         self.today_str = str(date.today())
