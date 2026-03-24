@@ -1,7 +1,10 @@
 import json
+import logging
 import os
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, BadRequestError
 from memory import MemoryManager
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You're talking to Caleb. He's a geotechnical field/lab tech in the San Luis Valley, CO, building a hyperadobe compound on his own land as a long-term project. Engaged with Advaita Vedanta (Adyashanti, Robert Adams, Shankara) and has a Zen practice background.
 
@@ -86,12 +89,21 @@ class ClaudeClient:
 
     @staticmethod
     def _clean_messages(messages: list) -> list:
-        """Strip any messages with non-string content (tool-use artifacts)."""
-        cleaned = [m for m in messages if isinstance(m.get("content"), str)]
-        # Ensure alternating roles — drop leading assistant messages
-        while cleaned and cleaned[0]["role"] == "assistant":
-            cleaned.pop(0)
-        return cleaned
+        """Strip tool-use artifacts and enforce strict alternating roles."""
+        # Only keep messages with plain string content
+        string_only = [m for m in messages if isinstance(m.get("content"), str)]
+        # Enforce strict alternation — if two consecutive messages share a role,
+        # drop the earlier one (keeps the most recent of each "run")
+        result = []
+        for m in string_only:
+            if result and result[-1]["role"] == m["role"]:
+                result[-1] = m
+            else:
+                result.append(m)
+        # Must start with a user message
+        while result and result[0]["role"] == "assistant":
+            result.pop(0)
+        return result
 
     async def chat(self, user_message: str) -> str:
         self.memory.add_message("user", user_message)
@@ -100,41 +112,53 @@ class ClaudeClient:
 
         tools = WEB_SEARCH_TOOL if self._tavily_key else []
 
-        while True:
-            response = await self.client.messages.create(
+        async def _call(msgs):
+            return await self.client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=2048,
                 system=self._system_prompt(),
-                messages=messages,
+                messages=msgs,
                 tools=tools or None,
             )
 
-            if response.stop_reason == "tool_use":
-                tool_block = next(b for b in response.content if b.type == "tool_use")
-                search_results = await self._web_search(tool_block.input["query"])
-                # Manually serialize to avoid model_dump() producing unexpected fields
-                assistant_content = []
-                for b in response.content:
-                    if b.type == "tool_use":
-                        assistant_content.append({
-                            "type": "tool_use",
-                            "id": b.id,
-                            "name": b.name,
-                            "input": b.input,
-                        })
-                    elif b.type == "text":
-                        assistant_content.append({"type": "text", "text": b.text})
-                messages.append({"role": "assistant", "content": assistant_content})
-                messages.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": tool_block.id,
-                        "content": search_results,
-                    }],
-                })
+        try:
+            response = await _call(messages)
+        except BadRequestError as e:
+            if "tool_use" in str(e):
+                # Corrupted history — retry with only the current message
+                logger.warning("Corrupted message history detected, retrying with cleared context.")
+                self.memory.clear_today()
+                self.memory.add_message("user", user_message)
+                messages = [{"role": "user", "content": user_message}]
+                response = await _call(messages)
             else:
-                break
+                raise
+
+        while response.stop_reason == "tool_use":
+            tool_block = next(b for b in response.content if b.type == "tool_use")
+            search_results = await self._web_search(tool_block.input["query"])
+            # Manually serialize to avoid model_dump() producing unexpected fields
+            assistant_content = []
+            for b in response.content:
+                if b.type == "tool_use":
+                    assistant_content.append({
+                        "type": "tool_use",
+                        "id": b.id,
+                        "name": b.name,
+                        "input": b.input,
+                    })
+                elif b.type == "text":
+                    assistant_content.append({"type": "text", "text": b.text})
+            messages.append({"role": "assistant", "content": assistant_content})
+            messages.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": tool_block.id,
+                    "content": search_results,
+                }],
+            })
+            response = await _call(messages)
 
         reply = next(
             (b.text for b in response.content if hasattr(b, "text")),
