@@ -64,18 +64,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         typing_task.cancel()
     await update.message.reply_text(reply)
-    await memory.save()
+    if memory.should_save_conversation:
+        await memory.save_conversation()
 
-    if wants_save:
+    if wants_save or memory.should_extract:
         facts = await claude.extract_facts()
         if facts:
             await memory.save_facts()
-            logger.info("Natural language memory save: %s", facts)
-    elif memory.should_extract:
-        facts = await claude.extract_facts()
-        if facts:
-            await memory.save_facts()
-            logger.info("Auto-extracted facts: %s", facts)
+            logger.info("Extracted facts: %s", facts)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -137,8 +133,11 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Clear conversation history (not facts)."""
     if not allowed(update):
         return
+    facts = await claude.extract_facts()
+    if facts:
+        await memory.save_facts()
     memory.clear_today()
-    await memory.save()
+    await memory.save_conversation()
     await update.message.reply_text("Conversation cleared.")
 
 
@@ -159,11 +158,30 @@ async def cmd_extract(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── Init ─────────────────────────────────────────────────────────────────────
 
 
+async def summarize_past_days():
+    """Background task: summarize any unsummarized past conversation days."""
+    try:
+        dates = await memory.get_unsummarized_dates()
+        if not dates:
+            return
+        for date_str in dates[-5:]:  # max 5 at startup
+            messages = await memory.load_date(date_str)
+            if messages:
+                summary = await claude.summarize_day(messages)
+                if summary:
+                    memory.add_summary(date_str, summary)
+                    logger.info("Summarized %s", date_str)
+        await memory.save_facts()
+    except Exception as e:
+        logger.warning("summarize_past_days failed: %s", e)
+
+
 async def post_init(application: Application):
     global claude
     logger.info("Loading memory from Dropbox...")
     await memory.load()
     claude = ClaudeClient(ANTHROPIC_API_KEY, memory)
+    asyncio.create_task(summarize_past_days())
     logger.info("Bot ready.")
 
 

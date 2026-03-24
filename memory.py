@@ -18,6 +18,7 @@ DEFAULT_FACTS = {
     "projects": [],
     "preferences": [],
     "notes": [],
+    "summaries": [],  # [{"date": "YYYY-MM-DD", "text": "..."}]
 }
 
 
@@ -107,13 +108,47 @@ class MemoryManager:
                 return True
         return False
 
+    def _list_conversation_dates(self) -> list[str]:
+        try:
+            result = self.dbx.files_list_folder(f"{DROPBOX_BASE}/conversations")
+            dates = []
+            for entry in result.entries:
+                if hasattr(entry, "name") and entry.name.endswith(".json"):
+                    dates.append(entry.name[:-5])
+            return sorted(dates)
+        except Exception:
+            return []
+
+    async def get_unsummarized_dates(self) -> list[str]:
+        all_dates = await self._async(self._list_conversation_dates)
+        summarized = {s["date"] for s in self.facts.get("summaries", [])}
+        return [d for d in all_dates if d != self.today_str and d not in summarized]
+
+    async def load_date(self, date_str: str) -> list:
+        convo_path = f"{DROPBOX_BASE}/conversations/{date_str}.json"
+        history = await self._async(self._download_json, convo_path, [])
+        return history or []
+
+    def add_summary(self, date: str, text: str):
+        summaries = self.facts.setdefault("summaries", [])
+        if not any(s["date"] == date for s in summaries):
+            summaries.append({"date": date, "text": text})
+            self.facts["summaries"] = sorted(summaries, key=lambda s: s["date"])[-30:]
+
     def get_memory_text(self) -> str:
         lines = []
         for cat, items in self.facts.items():
-            if items:
-                lines.append(f"[{cat.replace('_', ' ').title()}]")
-                lines.extend(f"- {item}" for item in items)
+            if cat == "summaries" or not items:
+                continue
+            lines.append(f"[{cat.replace('_', ' ').title()}]")
+            lines.extend(f"- {item}" for item in items)
         return "\n".join(lines)
+
+    def get_summaries_text(self, n: int = 5) -> str:
+        summaries = self.facts.get("summaries", [])[-n:]
+        if not summaries:
+            return ""
+        return "\n".join(f"[{s['date']}] {s['text']}" for s in summaries)
 
     def get_context_messages(self, n: int = 20) -> list:
         return self.conversation_history[-n:]
@@ -122,6 +157,14 @@ class MemoryManager:
         self.conversation_history = []
         self._message_count = 0
 
+    async def save_conversation(self):
+        convo_path = f"{DROPBOX_BASE}/conversations/{self.today_str}.json"
+        await self._async(self._upload_json, convo_path, self.conversation_history)
+
     @property
     def should_extract(self) -> bool:
-        return self._message_count > 0 and self._message_count % 15 == 0
+        return self._message_count > 0 and self._message_count % 8 == 0
+
+    @property
+    def should_save_conversation(self) -> bool:
+        return self._message_count > 0 and self._message_count % 5 == 0

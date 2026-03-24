@@ -16,6 +16,8 @@ EXTRACTION_PROMPT = """Review this conversation and extract any facts worth reme
 }
 Only include genuinely new, specific facts. Skip anything vague or already obvious from the base context. Empty lists are fine. No explanation, just JSON."""
 
+SUMMARY_PROMPT = """Summarize this conversation in 3-5 bullet points. Focus on specific facts, decisions, topics discussed, and anything actionable or worth remembering. Be concrete. No filler. Return plain text bullets only."""
+
 
 class ClaudeClient:
     def __init__(self, api_key: str, memory: MemoryManager):
@@ -23,10 +25,14 @@ class ClaudeClient:
         self.memory = memory
 
     def _system_prompt(self) -> str:
+        parts = [SYSTEM_PROMPT]
         memory_text = self.memory.get_memory_text()
         if memory_text:
-            return f"{SYSTEM_PROMPT}\n\n## Memory\n{memory_text}"
-        return SYSTEM_PROMPT
+            parts.append(f"## Memory\n{memory_text}")
+        summaries_text = self.memory.get_summaries_text(5)
+        if summaries_text:
+            parts.append(f"## Recent Session Summaries\n{summaries_text}")
+        return "\n\n".join(parts)
 
     async def chat(self, user_message: str) -> str:
         self.memory.add_message("user", user_message)
@@ -74,3 +80,19 @@ class ClaudeClient:
             return added
         except Exception:
             return {}
+
+    async def summarize_day(self, messages: list) -> str:
+        if not messages:
+            return ""
+        convo_text = "\n".join(
+            f"{m['role'].title()}: {m['content']}" for m in messages
+        )
+        response = await self.client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{
+                "role": "user",
+                "content": f"{SUMMARY_PROMPT}\n\nConversation:\n{convo_text}",
+            }],
+        )
+        return response.content[0].text.strip()
