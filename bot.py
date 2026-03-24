@@ -102,13 +102,71 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
     await update.message.reply_text(
-        "/memory — show everything stored about you\n"
+        "/memory — show all stored facts\n"
+        "/status — fact counts and session info\n"
+        "/summary — recent daily summaries\n"
+        "/search <term> — search stored facts\n"
         "/remember [category] fact — save a fact (categories: projects, preferences, notes)\n"
         "/forget <exact fact> — remove a fact\n"
-        "/extract — manually trigger fact extraction from recent conversation\n"
+        "/wipe <category> — clear all facts in a category\n"
+        "/extract — manually trigger fact extraction\n"
         "/clear — wipe today's conversation history (extracts facts first)\n"
         "/help — show this list"
     )
+
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    facts = memory.facts
+    lines = []
+    for cat, items in facts.items():
+        if cat == "summaries":
+            continue
+        lines.append(f"{cat.replace('_', ' ').title()}: {len(items)} facts")
+    lines.append(f"Summaries: {len(facts.get('summaries', []))}")
+    lines.append(f"Conversation messages today: {memory._message_count}")
+    await update.message.reply_text("\n".join(lines))
+
+
+async def cmd_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    text = memory.get_summaries_text(n=10)
+    await update.message.reply_text(text or "No summaries yet.")
+
+
+async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /search <term>")
+        return
+    term = " ".join(context.args).lower()
+    results = []
+    for cat, items in memory.facts.items():
+        if cat == "summaries":
+            continue
+        if isinstance(items, list):
+            for item in items:
+                if term in item.lower():
+                    results.append(f"[{cat.replace('_', ' ').title()}] {item}")
+    await update.message.reply_text("\n".join(results) if results else f"Nothing found for '{term}'.")
+
+
+async def cmd_wipe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    known = {"projects", "preferences", "notes", "about_caleb"}
+    if not context.args or context.args[0] not in known:
+        await update.message.reply_text(
+            "Usage: /wipe <category>\nCategories: projects, preferences, notes, about_caleb"
+        )
+        return
+    category = context.args[0]
+    memory.facts[category] = []
+    await memory.save_facts()
+    await update.message.reply_text(f"Cleared all {category} facts.")
 
 
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -239,6 +297,10 @@ def main():
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("summary", cmd_summary))
+    app.add_handler(CommandHandler("search", cmd_search))
+    app.add_handler(CommandHandler("wipe", cmd_wipe))
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("remember", cmd_remember))
     app.add_handler(CommandHandler("forget", cmd_forget))
