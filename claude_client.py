@@ -69,10 +69,19 @@ class ClaudeClient:
         except Exception as e:
             return f"Search failed: {e}"
 
+    @staticmethod
+    def _clean_messages(messages: list) -> list:
+        """Strip any messages with non-string content (tool-use artifacts)."""
+        cleaned = [m for m in messages if isinstance(m.get("content"), str)]
+        # Ensure alternating roles — drop leading assistant messages
+        while cleaned and cleaned[0]["role"] == "assistant":
+            cleaned.pop(0)
+        return cleaned
+
     async def chat(self, user_message: str) -> str:
         self.memory.add_message("user", user_message)
-        # Work on a copy so tool-use intermediate messages don't pollute history
-        messages = list(self.memory.get_context_messages(20))
+        # Work on a clean copy — no tool-use intermediate messages
+        messages = self._clean_messages(list(self.memory.get_context_messages(20)))
 
         tools = WEB_SEARCH_TOOL if self._tavily_key else []
 
@@ -88,7 +97,12 @@ class ClaudeClient:
             if response.stop_reason == "tool_use":
                 tool_block = next(b for b in response.content if b.type == "tool_use")
                 search_results = await self._web_search(tool_block.input["query"])
-                messages.append({"role": "assistant", "content": response.content})
+                # Serialize content blocks to dicts for reliable API round-tripping
+                assistant_content = [
+                    b.model_dump() if hasattr(b, "model_dump") else b
+                    for b in response.content
+                ]
+                messages.append({"role": "assistant", "content": assistant_content})
                 messages.append({
                     "role": "user",
                     "content": [{
@@ -100,7 +114,10 @@ class ClaudeClient:
             else:
                 break
 
-        reply = next(b.text for b in response.content if hasattr(b, "text"))
+        reply = next(
+            (b.text for b in response.content if hasattr(b, "text")),
+            "[no response]",
+        )
         self.memory.add_message("assistant", reply)
         return reply
 
