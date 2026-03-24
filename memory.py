@@ -1,12 +1,12 @@
 import json
 import logging
 from datetime import date
-
-logger = logging.getLogger(__name__)
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 import dropbox
-from dropbox.exceptions import ApiError
+from dropbox.exceptions import ApiError, AuthError
+
+logger = logging.getLogger(__name__)
 
 DROPBOX_BASE = "/CalebBot"
 FACTS_PATH = f"{DROPBOX_BASE}/memory/facts.json"
@@ -27,30 +27,39 @@ DEFAULT_FACTS = {
 
 class MemoryManager:
     def __init__(self, dropbox_refresh_token: str, app_key: str, app_secret: str):
-        self.dbx = dropbox.Dropbox(
-            oauth2_refresh_token=dropbox_refresh_token,
-            app_key=app_key,
-            app_secret=app_secret,
-        )
+        self._refresh_token = dropbox_refresh_token
+        self._app_key = app_key
+        self._app_secret = app_secret
         self._executor = ThreadPoolExecutor(max_workers=1)
         self.facts: dict = {k: list(v) for k, v in DEFAULT_FACTS.items()}
         self.conversation_history: list = []
         self.today_str = str(date.today())
         self._message_count = 0
 
+    def _dbx(self) -> dropbox.Dropbox:
+        """Fresh client per call — avoids shared token state corruption."""
+        return dropbox.Dropbox(
+            oauth2_refresh_token=self._refresh_token,
+            app_key=self._app_key,
+            app_secret=self._app_secret,
+        )
+
     # ── Dropbox helpers ──────────────────────────────────────────────────────
 
     def _download_json(self, path: str, default=None):
         try:
-            _, res = self.dbx.files_download(path)
+            _, res = self._dbx().files_download(path)
             return json.loads(res.content)
-        except ApiError:
+        except (ApiError, AuthError):
+            return default
+        except Exception as e:
+            logger.error("Dropbox download error (%s): %s", path, e)
             return default
 
     def _upload_json(self, path: str, data):
         try:
             content = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
-            self.dbx.files_upload(
+            self._dbx().files_upload(
                 content,
                 path,
                 mode=dropbox.files.WriteMode.overwrite,
@@ -67,19 +76,20 @@ class MemoryManager:
     # ── Load / save ──────────────────────────────────────────────────────────
 
     async def load(self):
-        try:
-            saved_facts = await self._async(self._download_json, FACTS_PATH, None)
-            if saved_facts:
-                for k, v in DEFAULT_FACTS.items():
-                    saved_facts.setdefault(k, list(v))
-                self.facts = saved_facts
+        saved_facts = await self._async(self._download_json, FACTS_PATH, None)
+        if saved_facts:
+            for k, v in DEFAULT_FACTS.items():
+                saved_facts.setdefault(k, list(v))
+            self.facts = saved_facts
+            logger.info("Facts loaded from Dropbox.")
+        else:
+            logger.warning("No facts found in Dropbox, using defaults.")
 
-            convo_path = f"{DROPBOX_BASE}/conversations/{self.today_str}.json"
-            history = await self._async(self._download_json, convo_path, [])
-            self.conversation_history = history[-60:] if history else []
-            self._message_count = len(self.conversation_history)
-        except Exception as e:
-            print(f"[Dropbox] load failed, starting fresh: {e}")
+        convo_path = f"{DROPBOX_BASE}/conversations/{self.today_str}.json"
+        history = await self._async(self._download_json, convo_path, [])
+        self.conversation_history = history[-60:] if history else []
+        self._message_count = len(self.conversation_history)
+        logger.info("Loaded %d conversation messages.", self._message_count)
 
     async def save_facts(self):
         await self._async(self._upload_json, FACTS_PATH, self.facts)
@@ -110,7 +120,7 @@ class MemoryManager:
 
     def _list_conversation_dates(self) -> list[str]:
         try:
-            result = self.dbx.files_list_folder(f"{DROPBOX_BASE}/conversations")
+            result = self._dbx().files_list_folder(f"{DROPBOX_BASE}/conversations")
             dates = []
             for entry in result.entries:
                 if hasattr(entry, "name") and entry.name.endswith(".json"):
