@@ -190,38 +190,56 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Ready.")
 
 
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update):
-        return
-    await update.message.reply_text(
+HELP_SECTIONS = {
+    "journal": (
         "JOURNAL\n"
         "/reflect — start an end-of-day reflection\n"
         "/journal <entry> — save a tagged note (use #tags)\n"
-        "/log [#tag] — view recent journal entries\n"
-        "\n"
+        "/log [#tag] — view recent entries"
+    ),
+    "docs": (
         "DOCUMENTS\n"
         "/docs — list available documents\n"
-        "/read <filename> — load a document into the conversation\n"
-        "\n"
+        "/read <filename> — load a document"
+    ),
+    "info": (
         "INFO\n"
         "/weather — current weather in the San Luis Valley\n"
         "/news — top news stories\n"
-        "/holidays — US holidays around today\n"
-        "\n"
+        "/holidays — US holidays around today"
+    ),
+    "memory": (
         "MEMORY\n"
         "/memory — show all stored facts\n"
         "/status — fact counts and session info\n"
         "/summary — recent daily summaries\n"
-        "/search <term> — search stored facts\n"
-        "\n"
+        "/search <term> — search stored facts"
+    ),
+    "manage": (
         "MANAGE\n"
         "/remember [category] fact — save a fact\n"
-        "    categories: projects, preferences, notes\n"
+        "    categories: projects, preferences, notes, wellbeing\n"
         "/forget <exact fact> — remove a fact\n"
         "/wipe <category> — clear an entire category\n"
         "/extract — trigger fact extraction\n"
-        "/clear — wipe today's conversation history"
-    )
+        "/clear — wipe today's conversation"
+    ),
+}
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    if context.args and context.args[0].lower() in HELP_SECTIONS:
+        await update.message.reply_text(HELP_SECTIONS[context.args[0].lower()])
+    else:
+        await update.message.reply_text(
+            "Available sections:\n"
+            "/help journal\n"
+            "/help docs\n"
+            "/help info\n"
+            "/help memory\n"
+            "/help manage"
+        )
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
