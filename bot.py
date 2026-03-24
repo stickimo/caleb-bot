@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 from dotenv import load_dotenv
 from telegram import Update
@@ -52,8 +53,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     wants_save = any(t in user_text.lower() for t in REMEMBER_TRIGGERS)
 
-    await context.bot.send_chat_action(update.effective_chat.id, "typing")
-    reply = await claude.chat(user_text)
+    async def keep_typing():
+        while True:
+            await context.bot.send_chat_action(update.effective_chat.id, "typing")
+            await asyncio.sleep(4)
+
+    typing_task = asyncio.create_task(keep_typing())
+    try:
+        reply = await claude.chat(user_text)
+    finally:
+        typing_task.cancel()
     await update.message.reply_text(reply)
     await memory.save()
 
