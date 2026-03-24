@@ -50,7 +50,11 @@ class MemoryManager:
         try:
             _, res = self._dbx().files_download(path)
             return json.loads(res.content)
-        except (ApiError, AuthError):
+        except ApiError as e:
+            logger.warning("Dropbox ApiError (%s): %s", path, e)
+            return default
+        except AuthError as e:
+            logger.error("Dropbox AuthError (%s): %s", path, e)
             return default
         except Exception as e:
             logger.error("Dropbox download error (%s): %s", path, e)
