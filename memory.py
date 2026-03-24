@@ -162,9 +162,5 @@ class MemoryManager:
         await self._async(self._upload_json, convo_path, self.conversation_history)
 
     @property
-    def should_extract(self) -> bool:
-        return self._message_count > 0 and self._message_count % 8 == 0
-
-    @property
     def should_save_conversation(self) -> bool:
         return self._message_count > 0 and self._message_count % 5 == 0

@@ -47,6 +47,24 @@ REMEMBER_TRIGGERS = (
     "make a note",
 )
 
+FILLER = {"ok", "okay", "thanks", "thank you", "got it", "sure", "yep", "nope",
+          "yes", "no", "lol", "haha", "cool", "nice", "great", "k"}
+
+def _is_substantive(text: str) -> bool:
+    """Returns True if the message is worth trying to extract facts from."""
+    words = text.lower().split()
+    return len(words) >= 5 and not all(w in FILLER for w in words)
+
+async def _background_extract():
+    """Run fact extraction without blocking the response."""
+    try:
+        facts = await claude.extract_facts()
+        if facts:
+            await memory.save_facts()
+            logger.info("Extracted facts: %s", facts)
+    except Exception as e:
+        logger.warning("Background extraction failed: %s", e)
+
 async def _process(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     wants_save = any(t in text.lower() for t in REMEMBER_TRIGGERS)
 
@@ -66,11 +84,8 @@ async def _process(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
     if memory.should_save_conversation:
         await memory.save_conversation()
 
-    if wants_save or memory.should_extract:
-        facts = await claude.extract_facts()
-        if facts:
-            await memory.save_facts()
-            logger.info("Extracted facts: %s", facts)
+    if wants_save or _is_substantive(text):
+        asyncio.create_task(_background_extract())
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -208,6 +223,9 @@ async def post_init(application: Application):
     await memory.load()
     claude = ClaudeClient(ANTHROPIC_API_KEY, memory)
     asyncio.create_task(summarize_past_days())
+    # Extract any facts missed from today's already-loaded conversation
+    if memory.conversation_history:
+        asyncio.create_task(_background_extract())
     logger.info("Bot ready.")
 
 
