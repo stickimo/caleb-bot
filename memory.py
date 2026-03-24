@@ -171,6 +171,41 @@ class MemoryManager:
         self.conversation_history = []
         self._message_count = 0
 
+    # ── Journal ──────────────────────────────────────────────────────────────
+
+    def _append_journal_entry(self, entry: dict):
+        path = f"{DROPBOX_BASE}/journal/{self.today_str}.json"
+        existing = self._download_json(path, [])
+        existing.append(entry)
+        self._upload_json(path, existing)
+
+    async def save_journal_entry(self, text: str, tags: list[str]):
+        from datetime import datetime
+        entry = {
+            "timestamp": datetime.now().strftime("%H:%M"),
+            "text": text,
+            "tags": tags,
+        }
+        await self._async(self._append_journal_entry, entry)
+
+    def _load_journal_days(self, days: int) -> list[dict]:
+        from datetime import date, timedelta
+        entries = []
+        for i in range(days):
+            d = (date.today() - timedelta(days=i)).isoformat()
+            path = f"{DROPBOX_BASE}/journal/{d}.json"
+            day_entries = self._download_json(path, [])
+            for e in day_entries:
+                e["date"] = d
+            entries.extend(day_entries)
+        return entries
+
+    async def get_journal_entries(self, days: int = 7, tag: str | None = None) -> list[dict]:
+        entries = await self._async(self._load_journal_days, days)
+        if tag:
+            entries = [e for e in entries if tag.lower() in [t.lower() for t in e.get("tags", [])]]
+        return entries
+
     @property
     def should_save_conversation(self) -> bool:
         return self._message_count > 0 and self._message_count % 5 == 0

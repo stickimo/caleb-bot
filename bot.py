@@ -115,6 +115,49 @@ async def cmd_read(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _process(update, context, f"[Document loaded: {filename}]\n\n{text}")
 
 
+async def cmd_reflect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    await _process(update, context,
+        "Let's do a quick end-of-day reflection. Ask me one good question to get started — "
+        "what happened today, what's unresolved, what's on my mind. Keep it simple."
+    )
+
+
+async def cmd_journal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /journal <entry> — use #tags to tag entries.")
+        return
+    import re
+    text = " ".join(context.args)
+    tags = re.findall(r"#(\w+)", text)
+    await memory.save_journal_entry(text, tags)
+    tag_str = "  " + " ".join(f"#{t}" for t in tags) if tags else ""
+    await update.message.reply_text(f"Saved.{tag_str}")
+
+
+async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    tag = context.args[0].lstrip("#") if context.args else None
+    entries = await memory.get_journal_entries(days=7, tag=tag)
+    if not entries:
+        msg = f"No entries found for #{tag}." if tag else "No journal entries in the last 7 days."
+        await update.message.reply_text(msg)
+        return
+    lines = []
+    current_date = None
+    for e in reversed(entries):
+        if e["date"] != current_date:
+            current_date = e["date"]
+            lines.append(f"\n{current_date}")
+        tag_str = " " + " ".join(f"#{t}" for t in e.get("tags", [])) if e.get("tags") else ""
+        lines.append(f"[{e['timestamp']}]{tag_str} {e['text']}")
+    await update.message.reply_text("\n".join(lines).strip())
+
+
 async def cmd_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
@@ -151,6 +194,11 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
     await update.message.reply_text(
+        "JOURNAL\n"
+        "/reflect — start an end-of-day reflection\n"
+        "/journal <entry> — save a tagged note (use #tags)\n"
+        "/log [#tag] — view recent journal entries\n"
+        "\n"
         "DOCUMENTS\n"
         "/docs — list available documents\n"
         "/read <filename> — load a document into the conversation\n"
@@ -358,6 +406,9 @@ def main():
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("reflect", cmd_reflect))
+    app.add_handler(CommandHandler("journal", cmd_journal))
+    app.add_handler(CommandHandler("log", cmd_log))
     app.add_handler(CommandHandler("docs", cmd_docs))
     app.add_handler(CommandHandler("read", cmd_read))
     app.add_handler(CommandHandler("weather", cmd_weather))
