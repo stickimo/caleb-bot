@@ -180,13 +180,9 @@ async def cmd_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List available documents in Dropbox."""
     if not allowed(update):
         return
-    docs, err = await memory._async(list_documents)
+    docs, err = await memory._async(list_documents, memory.dbx)
     if err:
-        await update.message.reply_text(
-            "Can't list documents (Dropbox scope issue).\n"
-            "Use /read <filename> directly — e.g.:\n"
-            "/read WAQTC Manual.pdf"
-        )
+        await update.message.reply_text(f"Error: {err}")
     elif docs:
         await update.message.reply_text("Docs available:\n" + "\n".join(f"- {d}" for d in docs))
     else:
@@ -205,7 +201,7 @@ async def cmd_read(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Reading {filename}...")
     await context.bot.send_chat_action(update.effective_chat.id, "typing")
 
-    text = await memory._async(fetch_and_parse, None, filename)
+    text = await memory._async(fetch_and_parse, memory.dbx, filename)
 
     if text.startswith("File not found") or text.startswith("Error") or text.startswith("Unsupported"):
         await update.message.reply_text(text)
