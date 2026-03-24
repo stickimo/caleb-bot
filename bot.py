@@ -13,6 +13,7 @@ from telegram.ext import (
 from memory import MemoryManager
 from claude_client import ClaudeClient
 from transcribe import transcribe_voice
+from docs import list_documents, fetch_and_parse
 
 load_dotenv()
 logging.basicConfig(
@@ -175,6 +176,44 @@ async def cmd_extract(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Nothing new to extract.")
 
 
+async def cmd_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List available documents in Dropbox."""
+    if not allowed(update):
+        return
+    docs = await asyncio.get_event_loop().run_in_executor(
+        None, list_documents, memory.dbx
+    )
+    if docs:
+        await update.message.reply_text("Docs available:\n" + "\n".join(f"- {d}" for d in docs))
+    else:
+        await update.message.reply_text("No documents found in /CalebBot/documents/")
+
+
+async def cmd_read(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fetch a document from Dropbox and inject it into the conversation."""
+    if not allowed(update):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /read <filename>\nUse /docs to see available files.")
+        return
+
+    filename = " ".join(context.args)
+    await update.message.reply_text(f"Reading {filename}...")
+    await context.bot.send_chat_action(update.effective_chat.id, "typing")
+
+    text = await asyncio.get_event_loop().run_in_executor(
+        None, fetch_and_parse, memory.dbx, filename
+    )
+
+    if text.startswith("File not found") or text.startswith("Error") or text.startswith("Unsupported"):
+        await update.message.reply_text(text)
+        return
+
+    # Inject document into conversation as a user message so Claude has full context
+    doc_message = f"[Document loaded: {filename}]\n\n{text}"
+    await _process(update, context, doc_message)
+
+
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
@@ -243,6 +282,8 @@ def main():
     app.add_handler(CommandHandler("forget", cmd_forget))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("extract", cmd_extract))
+    app.add_handler(CommandHandler("docs", cmd_docs))
+    app.add_handler(CommandHandler("read", cmd_read))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 
