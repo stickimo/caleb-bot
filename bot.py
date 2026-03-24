@@ -39,16 +39,30 @@ def allowed(update: Update) -> bool:
 # ── Handlers ─────────────────────────────────────────────────────────────────
 
 
+REMEMBER_TRIGGERS = (
+    "remember that", "remember this", "save that", "save this",
+    "keep that in mind", "note that", "note this", "don't forget",
+    "make a note",
+)
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
 
+    user_text = update.message.text
+    wants_save = any(t in user_text.lower() for t in REMEMBER_TRIGGERS)
+
     await context.bot.send_chat_action(update.effective_chat.id, "typing")
-    reply = await claude.chat(update.message.text)
+    reply = await claude.chat(user_text)
     await update.message.reply_text(reply)
     await memory.save()
 
-    if memory.should_extract:
+    if wants_save:
+        facts = await claude.extract_facts()
+        if facts:
+            await memory.save_facts()
+            logger.info("Natural language memory save: %s", facts)
+    elif memory.should_extract:
         facts = await claude.extract_facts()
         if facts:
             await memory.save_facts()
