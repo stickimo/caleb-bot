@@ -1,12 +1,14 @@
 import os
 import asyncio
 import logging
+from datetime import date
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
     ContextTypes,
 )
@@ -40,8 +42,113 @@ def allowed(update: Update) -> bool:
     return str(update.effective_user.id) == ALLOWED_USER_ID
 
 
-# ── Handlers ─────────────────────────────────────────────────────────────────
+# ── Menu ─────────────────────────────────────────────────────────────────────
 
+def _main_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Bots",    callback_data="s:bots"),
+         InlineKeyboardButton("Journal", callback_data="s:journal")],
+        [InlineKeyboardButton("Docs",    callback_data="s:docs"),
+         InlineKeyboardButton("Info",    callback_data="s:info")],
+        [InlineKeyboardButton("Memory",  callback_data="s:memory"),
+         InlineKeyboardButton("Manage",  callback_data="s:manage")],
+    ])
+
+_BACK = [InlineKeyboardButton("Back", callback_data="s:main")]
+
+SECTION_MENUS = {
+    "bots": {
+        "text": (
+            "Bots\n\n"
+            "CalebBot reads live data from the specialist bots via shared Dropbox files.\n\n"
+            "ScheduleBot — cylinder break schedule and due dates\n"
+            "FieldOpsBot — field notes, photos, batch tickets by job\n"
+            "MetQueryBot — analytical queries over field data\n\n"
+            "Tap to query, or type naturally:\n"
+            "\"check the schedule\", \"what's been filed\", \"full picture\""
+        ),
+        "keyboard": InlineKeyboardMarkup([
+            [InlineKeyboardButton("Check Schedule",  callback_data="bc:schedulebot"),
+             InlineKeyboardButton("Full Overview",   callback_data="bc:overview")],
+            [InlineKeyboardButton("Check Field Ops", callback_data="bc:fieldbot"),
+             InlineKeyboardButton("Query Field Data",callback_data="bc:querybot")],
+            [_BACK[0]],
+        ]),
+    },
+    "journal": {
+        "text": (
+            "Journal\n\n"
+            "Reflect — guided end-of-day reflection\n"
+            "View Log — last 7 days of entries\n\n"
+            "/journal <entry> — save a note (use #tags)\n"
+            "/log [#tag] — filter entries by tag"
+        ),
+        "keyboard": InlineKeyboardMarkup([
+            [InlineKeyboardButton("Reflect",  callback_data="c:reflect"),
+             InlineKeyboardButton("View Log", callback_data="c:log")],
+            [_BACK[0]],
+        ]),
+    },
+    "docs": {
+        "text": (
+            "Documents\n\n"
+            "List Docs — show available files\n\n"
+            "/read <filename> — load a document into conversation"
+        ),
+        "keyboard": InlineKeyboardMarkup([
+            [InlineKeyboardButton("List Docs", callback_data="c:docs")],
+            [_BACK[0]],
+        ]),
+    },
+    "info": {
+        "text": "Info\n\nCurrent weather, news, and upcoming US holidays.",
+        "keyboard": InlineKeyboardMarkup([
+            [InlineKeyboardButton("Weather",  callback_data="c:weather"),
+             InlineKeyboardButton("News",     callback_data="c:news"),
+             InlineKeyboardButton("Holidays", callback_data="c:holidays")],
+            [_BACK[0]],
+        ]),
+    },
+    "memory": {
+        "text": (
+            "Memory\n\n"
+            "View Memory — all stored facts\n"
+            "Status — fact counts and session info\n"
+            "Daily Summaries — last 10 session summaries\n\n"
+            "/search <term> — keyword search across facts"
+        ),
+        "keyboard": InlineKeyboardMarkup([
+            [InlineKeyboardButton("View Memory",      callback_data="c:memory"),
+             InlineKeyboardButton("Status",           callback_data="c:status")],
+            [InlineKeyboardButton("Daily Summaries",  callback_data="c:summary")],
+            [_BACK[0]],
+        ]),
+    },
+    "manage": {
+        "text": (
+            "Manage\n\n"
+            "Extract Facts — run Haiku extraction now\n\n"
+            "/remember [category] <fact> — save a fact\n"
+            "    categories: projects, preferences, notes, wellbeing\n"
+            "/forget <exact fact> — remove a fact\n"
+            "/wipe <category> — clear an entire category"
+        ),
+        "keyboard": InlineKeyboardMarkup([
+            [InlineKeyboardButton("Extract Facts", callback_data="c:extract")],
+            [_BACK[0]],
+        ]),
+    },
+}
+
+_BOT_QUERIES = {
+    "schedulebot": "What's on the schedule?",
+    "fieldbot":    "What's been filed recently?",
+    "querybot":    "Give me a summary of recent field data.",
+    "overview":    "Give me the full picture across all bots.",
+}
+
+
+# ── Core helpers ──────────────────────────────────────────────────────────────
 
 REMEMBER_TRIGGERS = (
     "remember that", "remember this", "save that", "save this",
@@ -65,12 +172,12 @@ async def _background_extract():
     except Exception as e:
         logger.warning("Background extraction failed: %s", e)
 
-async def _process(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+async def _process_chat(chat_id: int, context: ContextTypes.DEFAULT_TYPE, text: str):
     wants_save = any(t in text.lower() for t in REMEMBER_TRIGGERS)
 
     async def keep_typing():
         while True:
-            await context.bot.send_chat_action(update.effective_chat.id, "typing")
+            await context.bot.send_chat_action(chat_id, "typing")
             await asyncio.sleep(4)
 
     typing_task = asyncio.create_task(keep_typing())
@@ -79,13 +186,115 @@ async def _process(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
     finally:
         typing_task.cancel()
 
-    await update.message.reply_text(reply)
+    await context.bot.send_message(chat_id, reply)
 
     if memory.should_save_conversation:
         await memory.save_conversation()
 
     if wants_save or _is_substantive(text):
         asyncio.create_task(_background_extract())
+
+async def _process(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    await _process_chat(update.effective_chat.id, context, text)
+
+async def _run_bot_query(chat_id: int, bot_name: str, query: str, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_chat_action(chat_id, "typing")
+    data = await memory._async(load_bot_data, memory._dbx, bot_name)
+    if not data:
+        await context.bot.send_message(chat_id, f"Couldn't load data for {bot_name}.")
+        return
+    reply = await claude.ask_bot(bot_name, query, data)
+    await context.bot.send_message(chat_id, reply)
+
+
+# ── Handlers ──────────────────────────────────────────────────────────────────
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    await update.message.reply_text("CalebOS — what do you need?", reply_markup=_main_menu())
+
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    chat_id = query.message.chat_id
+
+    # Section navigation
+    if data.startswith("s:"):
+        section = data[2:]
+        if section == "main":
+            await query.edit_message_text("CalebOS — what do you need?", reply_markup=_main_menu())
+        else:
+            info = SECTION_MENUS.get(section)
+            if info:
+                await query.edit_message_text(info["text"], reply_markup=info["keyboard"])
+        return
+
+    # Bot queries
+    if data.startswith("bc:"):
+        bot_name = data[3:]
+        query_text = _BOT_QUERIES.get(bot_name, "What's the latest?")
+        await _run_bot_query(chat_id, bot_name, query_text, context)
+        return
+
+    # Direct commands
+    if data.startswith("c:"):
+        cmd = data[2:]
+        if cmd == "weather":
+            await _process_chat(chat_id, context, "What's the current weather in the San Luis Valley, CO?")
+        elif cmd == "news":
+            await _process_chat(chat_id, context, "What are the top news stories right now? Give me a brief rundown.")
+        elif cmd == "holidays":
+            today = date.today().strftime("%B %d, %Y")
+            await _process_chat(chat_id, context, f"Today is {today}. Are there any US holidays today or in the next few days?")
+        elif cmd == "reflect":
+            await _process_chat(chat_id, context,
+                "Let's do a quick end-of-day reflection. Ask me one good question to get started — "
+                "what happened today, what's unresolved, what's on my mind. Keep it simple.")
+        elif cmd == "memory":
+            await context.bot.send_message(chat_id, memory.get_memory_text() or "Memory is empty.")
+        elif cmd == "status":
+            facts = memory.facts
+            lines = [f"{cat.replace('_', ' ').title()}: {len(items)} facts"
+                     for cat, items in facts.items() if cat != "summaries"]
+            lines.append(f"Summaries: {len(facts.get('summaries', []))}")
+            lines.append(f"Conversation messages today: {memory._message_count}")
+            await context.bot.send_message(chat_id, "\n".join(lines))
+        elif cmd == "summary":
+            await context.bot.send_message(chat_id, memory.get_summaries_text(n=10) or "No summaries yet.")
+        elif cmd == "docs":
+            docs, err = await memory._async(list_documents, memory._dbx())
+            if err:
+                await context.bot.send_message(chat_id, err)
+            elif docs:
+                await context.bot.send_message(chat_id, "Docs available:\n" + "\n".join(f"/read {d}" for d in docs))
+            else:
+                await context.bot.send_message(chat_id, "No documents found in /CalebBot/documents/")
+        elif cmd == "log":
+            entries = await memory.get_journal_entries(days=7)
+            if not entries:
+                await context.bot.send_message(chat_id, "No journal entries in the last 7 days.")
+                return
+            lines = []
+            current_date = None
+            for e in reversed(entries):
+                if e["date"] != current_date:
+                    current_date = e["date"]
+                    lines.append(f"\n{current_date}")
+                tag_str = " " + " ".join(f"#{t}" for t in e.get("tags", [])) if e.get("tags") else ""
+                lines.append(f"[{e['timestamp']}]{tag_str} {e['text']}")
+            await context.bot.send_message(chat_id, "\n".join(lines).strip())
+        elif cmd == "extract":
+            await context.bot.send_chat_action(chat_id, "typing")
+            facts = await claude.extract_facts()
+            if facts:
+                await memory.save_facts()
+                lines = [f"[{cat}] {item}" for cat, items in facts.items() for item in items]
+                await context.bot.send_message(chat_id, "Extracted:\n" + "\n".join(lines))
+            else:
+                await context.bot.send_message(chat_id, "Nothing new to extract.")
 
 
 async def cmd_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -117,13 +326,7 @@ async def cmd_read(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _ask_bot(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_name: str, query: str):
-    await context.bot.send_chat_action(update.effective_chat.id, "typing")
-    data = await memory._async(load_bot_data, memory._dbx, bot_name)
-    if not data:
-        await update.message.reply_text(f"Couldn't load data for {bot_name}.")
-        return
-    reply = await claude.ask_bot(bot_name, query, data)
-    await update.message.reply_text(reply)
+    await _run_bot_query(update.effective_chat.id, bot_name, query, context)
 
 
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -203,7 +406,6 @@ async def cmd_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_holidays(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
-    from datetime import date
     today = date.today().strftime("%B %d, %Y")
     await _process(update, context, f"Today is {today}. Are there any US holidays today or in the next few days?")
 
@@ -225,69 +427,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Ready.")
 
 
-HELP_SECTIONS = {
-    "journal": (
-        "BOTS\n"
-        "/ask <bot> <query> — query schedulebot, fieldbot, or querybot\n"
-        "\n"
-        "JOURNAL\n"
-        "/reflect — start an end-of-day reflection\n"
-        "/journal <entry> — save a tagged note (use #tags)\n"
-        "/log [#tag] — view recent entries"
-    ),
-    "docs": (
-        "DOCUMENTS\n"
-        "/docs — list available documents\n"
-        "/read <filename> — load a document"
-    ),
-    "info": (
-        "INFO\n"
-        "/weather — current weather in the San Luis Valley\n"
-        "/news — top news stories\n"
-        "/holidays — US holidays around today"
-    ),
-    "memory": (
-        "MEMORY\n"
-        "/memory — show all stored facts\n"
-        "/status — fact counts and session info\n"
-        "/summary — recent daily summaries\n"
-        "/search <term> — search stored facts"
-    ),
-    "manage": (
-        "MANAGE\n"
-        "/remember [category] fact — save a fact\n"
-        "    categories: projects, preferences, notes, wellbeing\n"
-        "/forget <exact fact> — remove a fact\n"
-        "/wipe <category> — clear an entire category\n"
-        "/extract — trigger fact extraction"
-    ),
-}
-
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update):
-        return
-    if context.args and context.args[0].lower() in HELP_SECTIONS:
-        await update.message.reply_text(HELP_SECTIONS[context.args[0].lower()])
-    else:
-        await update.message.reply_text(
-            "Available sections:\n"
-            "/help journal\n"
-            "/help docs\n"
-            "/help info\n"
-            "/help memory\n"
-            "/help manage"
-        )
-
-
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
     facts = memory.facts
-    lines = []
-    for cat, items in facts.items():
-        if cat == "summaries":
-            continue
-        lines.append(f"{cat.replace('_', ' ').title()}: {len(items)} facts")
+    lines = [f"{cat.replace('_', ' ').title()}: {len(items)} facts"
+             for cat, items in facts.items() if cat != "summaries"]
     lines.append(f"Summaries: {len(facts.get('summaries', []))}")
     lines.append(f"Conversation messages today: {memory._message_count}")
     await update.message.reply_text("\n".join(lines))
@@ -324,7 +469,7 @@ async def cmd_wipe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     known = {"projects", "preferences", "notes", "about_caleb", "wellbeing"}
     if not context.args or context.args[0] not in known:
         await update.message.reply_text(
-            "Usage: /wipe <category>\nCategories: projects, preferences, notes, about_caleb"
+            "Usage: /wipe <category>\nCategories: projects, preferences, notes, about_caleb, wellbeing"
         )
         return
     category = context.args[0]
@@ -346,16 +491,14 @@ async def cmd_remember(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
         await update.message.reply_text(
-            "Usage: /remember [category] fact\nCategories: projects, preferences, notes"
+            "Usage: /remember [category] fact\nCategories: projects, preferences, notes, wellbeing"
         )
         return
-
     known = {"projects", "preferences", "notes", "about_caleb", "wellbeing"}
     if args[0] in known and len(args) > 1:
         category, fact = args[0], " ".join(args[1:])
     else:
         category, fact = "notes", " ".join(args)
-
     added = memory.add_fact(fact, category)
     await memory.save_facts()
     await update.message.reply_text("Saved." if added else "Already in memory.")
@@ -374,7 +517,6 @@ async def cmd_forget(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Removed.")
     else:
         await update.message.reply_text("Fact not found — use /memory to see exact text.")
-
 
 
 async def cmd_extract(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -449,26 +591,26 @@ def main():
         .build()
     )
 
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("ask", cmd_ask))
-    app.add_handler(CommandHandler("reflect", cmd_reflect))
-    app.add_handler(CommandHandler("journal", cmd_journal))
-    app.add_handler(CommandHandler("log", cmd_log))
-    app.add_handler(CommandHandler("docs", cmd_docs))
-    app.add_handler(CommandHandler("read", cmd_read))
-    app.add_handler(CommandHandler("weather", cmd_weather))
-    app.add_handler(CommandHandler("news", cmd_news))
+    app.add_handler(CommandHandler("start",    cmd_start))
+    app.add_handler(CommandHandler("help",     cmd_help))
+    app.add_handler(CommandHandler("ask",      cmd_ask))
+    app.add_handler(CommandHandler("reflect",  cmd_reflect))
+    app.add_handler(CommandHandler("journal",  cmd_journal))
+    app.add_handler(CommandHandler("log",      cmd_log))
+    app.add_handler(CommandHandler("docs",     cmd_docs))
+    app.add_handler(CommandHandler("read",     cmd_read))
+    app.add_handler(CommandHandler("weather",  cmd_weather))
+    app.add_handler(CommandHandler("news",     cmd_news))
     app.add_handler(CommandHandler("holidays", cmd_holidays))
-    app.add_handler(CommandHandler("status", cmd_status))
-    app.add_handler(CommandHandler("summary", cmd_summary))
-    app.add_handler(CommandHandler("search", cmd_search))
-    app.add_handler(CommandHandler("wipe", cmd_wipe))
-    app.add_handler(CommandHandler("memory", cmd_memory))
+    app.add_handler(CommandHandler("status",   cmd_status))
+    app.add_handler(CommandHandler("summary",  cmd_summary))
+    app.add_handler(CommandHandler("search",   cmd_search))
+    app.add_handler(CommandHandler("wipe",     cmd_wipe))
+    app.add_handler(CommandHandler("memory",   cmd_memory))
     app.add_handler(CommandHandler("remember", cmd_remember))
-    app.add_handler(CommandHandler("forget", cmd_forget))
-
-    app.add_handler(CommandHandler("extract", cmd_extract))
+    app.add_handler(CommandHandler("forget",   cmd_forget))
+    app.add_handler(CommandHandler("extract",  cmd_extract))
+    app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 
