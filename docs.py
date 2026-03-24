@@ -6,12 +6,13 @@ DOCS_PATH = "/CalebBot/documents"
 MAX_CHARS = 60000  # ~15k tokens — leaves plenty of room for conversation
 
 
-def list_documents(dbx: dropbox.Dropbox) -> list[str]:
+def list_documents(dbx: dropbox.Dropbox) -> tuple[list[str], str | None]:
+    """Returns (filenames, error_message). error_message is None on success."""
     try:
         result = dbx.files_list_folder(DOCS_PATH)
-        return sorted(e.name for e in result.entries if hasattr(e, "name"))
-    except Exception:
-        return []
+        return sorted(e.name for e in result.entries if hasattr(e, "name")), None
+    except Exception as e:
+        return [], f"Error listing {DOCS_PATH}: {e}"
 
 
 def fetch_and_parse(dbx: dropbox.Dropbox, filename: str) -> str:

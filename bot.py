@@ -180,10 +180,12 @@ async def cmd_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List available documents in Dropbox."""
     if not allowed(update):
         return
-    docs = await asyncio.get_event_loop().run_in_executor(
+    docs, err = await asyncio.get_event_loop().run_in_executor(
         None, list_documents, memory.dbx
     )
-    if docs:
+    if err:
+        await update.message.reply_text(err)
+    elif docs:
         await update.message.reply_text("Docs available:\n" + "\n".join(f"- {d}" for d in docs))
     else:
         await update.message.reply_text("No documents found in /CalebBot/documents/")
