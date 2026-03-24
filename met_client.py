@@ -23,7 +23,8 @@ BOT_CONFIG = {
         "prompt": (
             "You have access to ScheduleBot's live data: the current field schedule and "
             "confirmed break records. Answer the query using this data. Be specific about "
-            "dates, times, jobs, and break due dates. If something isn't in the data, say so."
+            "dates, times, jobs, and break due dates. If something isn't in the data, say so. "
+            "Plain text only — no markdown tables or headers. This is a Telegram message."
         ),
         "paths": [
             f"{MET_BASE}/schedule.json",
@@ -34,7 +35,8 @@ BOT_CONFIG = {
         "prompt": (
             "You have access to FieldOpsBot's live data: the jobs registry and activity log. "
             "Answer the query using this data. Be specific about job numbers, file types, "
-            "dates, and activities logged."
+            "dates, and activities logged. "
+            "Plain text only — no markdown tables or headers. This is a Telegram message."
         ),
         "paths": [
             f"{MET_BASE}/jobs.json",
@@ -45,7 +47,8 @@ BOT_CONFIG = {
         "prompt": (
             "You have access to MetQueryBot's data sources: the jobs registry and full "
             "activity log. Answer the query analytically. Be thorough — include counts, "
-            "dates, job breakdowns, and patterns where relevant."
+            "dates, job breakdowns, and patterns where relevant. "
+            "Plain text only — no markdown tables or headers. This is a Telegram message."
         ),
         "paths": [
             f"{MET_BASE}/jobs.json",
