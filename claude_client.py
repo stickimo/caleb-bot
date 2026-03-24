@@ -167,6 +167,30 @@ class ClaudeClient:
         self.memory.add_message("assistant", reply)
         return reply
 
+    async def vision(self, image_bytes: bytes, caption: str = "") -> str:
+        import base64
+        image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
+        prompt = caption if caption else "What's in this image?"
+        recent = self._clean_messages(list(self.memory.get_context_messages(10)))
+        vision_msg = {
+            "role": "user",
+            "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}},
+                {"type": "text", "text": prompt},
+            ],
+        }
+        messages = recent + [vision_msg]
+        response = await self.client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            system=self._system_prompt(),
+            messages=messages,
+        )
+        reply = next((b.text for b in response.content if hasattr(b, "text")), "[no response]")
+        self.memory.add_message("user", f"[Image{': ' + caption if caption else ''}]")
+        self.memory.add_message("assistant", reply)
+        return reply
+
     async def extract_facts(self) -> dict:
         """Use Haiku to extract notable facts from recent conversation."""
         recent = self.memory.get_context_messages(30)

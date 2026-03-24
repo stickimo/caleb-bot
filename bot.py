@@ -548,6 +548,25 @@ async def cmd_extract(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Nothing new to extract.")
 
 
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    try:
+        photo_file = await update.message.photo[-1].get_file()
+        photo_bytes = bytes(await photo_file.download_as_bytearray())
+    except Exception as e:
+        logger.error("Photo download failed: %s", e)
+        await update.message.reply_text("Couldn't download the image.")
+        return
+
+    caption = update.message.caption or ""
+    await context.bot.send_chat_action(update.effective_chat.id, "typing")
+    reply = await claude.vision(photo_bytes, caption)
+    await update.message.reply_text(reply)
+    if memory.should_save_conversation:
+        await memory.save_conversation()
+
+
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
@@ -630,6 +649,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     logger.info("Starting polling...")
     app.run_polling(drop_pending_updates=True)
