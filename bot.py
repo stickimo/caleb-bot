@@ -203,7 +203,7 @@ async def cmd_read(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = await memory._async(fetch_and_parse, memory.dbx, filename)
 
-    if text.startswith("File not found") or text.startswith("Error") or text.startswith("Unsupported"):
+    if text.startswith("File not found") or text.startswith("Error") or text.startswith("Unsupported") or text.startswith("Download error") or text.startswith("PDF parse error"):
         await update.message.reply_text(text)
         return
 

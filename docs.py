@@ -1,5 +1,8 @@
 import io
+import logging
 from dropbox.exceptions import ApiError
+
+logger = logging.getLogger(__name__)
 
 DOCS_PATH = "/CalebBot/documents"
 MAX_CHARS = 60000  # ~15k tokens — leaves plenty of room for conversation
@@ -18,9 +21,11 @@ def fetch_and_parse(dbx, filename: str) -> str:
     path = f"{DOCS_PATH}/{filename}"
     try:
         _, res = dbx.files_download(path)
-    except ApiError:
-        return f"File not found: {filename}"
+    except ApiError as e:
+        logger.error("Dropbox ApiError downloading %s: %s", path, e)
+        return f"File not found: {filename} ({e})"
     except Exception as e:
+        logger.error("Dropbox download error for %s: %s", path, e)
         return f"Download error: {e}"
 
     name_lower = filename.lower()
