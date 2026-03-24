@@ -259,8 +259,7 @@ HELP_SECTIONS = {
         "    categories: projects, preferences, notes, wellbeing\n"
         "/forget <exact fact> — remove a fact\n"
         "/wipe <category> — clear an entire category\n"
-        "/extract — trigger fact extraction\n"
-        "/clear — wipe today's conversation"
+        "/extract — trigger fact extraction"
     ),
 }
 
@@ -377,16 +376,6 @@ async def cmd_forget(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Fact not found — use /memory to see exact text.")
 
 
-async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update):
-        return
-    facts = await claude.extract_facts()
-    if facts:
-        await memory.save_facts()
-    memory.clear_today()
-    await memory.save_conversation()
-    await update.message.reply_text("Conversation cleared.")
-
 
 async def cmd_extract(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
@@ -478,7 +467,7 @@ def main():
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("remember", cmd_remember))
     app.add_handler(CommandHandler("forget", cmd_forget))
-    app.add_handler(CommandHandler("clear", cmd_clear))
+
     app.add_handler(CommandHandler("extract", cmd_extract))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
