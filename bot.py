@@ -13,7 +13,6 @@ from telegram.ext import (
 from memory import MemoryManager
 from claude_client import ClaudeClient
 from transcribe import transcribe_voice
-from docs import list_documents, fetch_and_parse
 
 load_dotenv()
 logging.basicConfig(
@@ -27,7 +26,7 @@ ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 DROPBOX_REFRESH_TOKEN = os.environ["DROPBOX_REFRESH_TOKEN"]
 DROPBOX_APP_KEY = os.environ["DROPBOX_APP_KEY"]
 DROPBOX_APP_SECRET = os.environ["DROPBOX_APP_SECRET"]
-ALLOWED_USER_ID = os.getenv("ALLOWED_USER_ID")  # your Telegram numeric user ID
+ALLOWED_USER_ID = os.getenv("ALLOWED_USER_ID")
 
 memory = MemoryManager(DROPBOX_REFRESH_TOKEN, DROPBOX_APP_KEY, DROPBOX_APP_SECRET)
 claude: ClaudeClient | None = None
@@ -52,12 +51,10 @@ FILLER = {"ok", "okay", "thanks", "thank you", "got it", "sure", "yep", "nope",
           "yes", "no", "lol", "haha", "cool", "nice", "great", "k"}
 
 def _is_substantive(text: str) -> bool:
-    """Returns True if the message is worth trying to extract facts from."""
     words = text.lower().split()
     return len(words) >= 5 and not all(w in FILLER for w in words)
 
 async def _background_extract():
-    """Run fact extraction without blocking the response."""
     try:
         facts = await claude.extract_facts()
         if facts:
@@ -109,12 +106,6 @@ async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_remember(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /remember <fact>
-    /remember projects <fact>
-    /remember preferences <fact>
-    /remember notes <fact>
-    """
     if not allowed(update):
         return
     args = context.args
@@ -151,7 +142,6 @@ async def cmd_forget(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Clear conversation history (not facts)."""
     if not allowed(update):
         return
     facts = await claude.extract_facts()
@@ -163,7 +153,6 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_extract(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Manually trigger fact extraction from recent conversation."""
     if not allowed(update):
         return
     await context.bot.send_chat_action(update.effective_chat.id, "typing")
@@ -174,42 +163,6 @@ async def cmd_extract(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Extracted:\n" + "\n".join(lines))
     else:
         await update.message.reply_text("Nothing new to extract.")
-
-
-async def cmd_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List available documents in Dropbox."""
-    if not allowed(update):
-        return
-    docs, err = await memory._async(list_documents, memory.dbx)
-    if err:
-        await update.message.reply_text(f"Error: {err}")
-    elif docs:
-        await update.message.reply_text("Docs available:\n" + "\n".join(f"- {d}" for d in docs))
-    else:
-        await update.message.reply_text("No documents found in /CalebBot/documents/")
-
-
-async def cmd_read(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetch a document from Dropbox and inject it into the conversation."""
-    if not allowed(update):
-        return
-    if not context.args:
-        await update.message.reply_text("Usage: /read <filename>\nUse /docs to see available files.")
-        return
-
-    filename = " ".join(context.args)
-    await update.message.reply_text(f"Reading {filename}...")
-    await context.bot.send_chat_action(update.effective_chat.id, "typing")
-
-    text = await memory._async(fetch_and_parse, memory.dbx, filename)
-
-    if text.startswith("File not found") or text.startswith("Error") or text.startswith("Unsupported") or text.startswith("Download error") or text.startswith("PDF parse error"):
-        await update.message.reply_text(text)
-        return
-
-    # Inject document into conversation as a user message so Claude has full context
-    doc_message = f"[Document loaded: {filename}]\n\n{text}"
-    await _process(update, context, doc_message)
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -228,7 +181,6 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Got empty transcription.")
         return
 
-    # Echo transcription so you know what it heard, then respond
     await update.message.reply_text(f"[voice] {transcribed}")
     await _process(update, context, transcribed)
 
@@ -237,12 +189,11 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def summarize_past_days():
-    """Background task: summarize any unsummarized past conversation days."""
     try:
         dates = await memory.get_unsummarized_dates()
         if not dates:
             return
-        for date_str in dates[-5:]:  # max 5 at startup
+        for date_str in dates[-5:]:
             messages = await memory.load_date(date_str)
             if messages:
                 summary = await claude.summarize_day(messages)
@@ -260,7 +211,6 @@ async def post_init(application: Application):
     await memory.load()
     claude = ClaudeClient(ANTHROPIC_API_KEY, memory)
     asyncio.create_task(summarize_past_days())
-    # Extract any facts missed from today's already-loaded conversation
     if memory.conversation_history:
         asyncio.create_task(_background_extract())
     logger.info("Bot ready.")
@@ -280,8 +230,6 @@ def main():
     app.add_handler(CommandHandler("forget", cmd_forget))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("extract", cmd_extract))
-    app.add_handler(CommandHandler("docs", cmd_docs))
-    app.add_handler(CommandHandler("read", cmd_read))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 

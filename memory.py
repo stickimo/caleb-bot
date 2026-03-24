@@ -63,7 +63,6 @@ class MemoryManager:
     # ── Load / save ──────────────────────────────────────────────────────────
 
     async def load(self):
-        """Pull facts and today's conversation from Dropbox on startup."""
         try:
             saved_facts = await self._async(self._download_json, FACTS_PATH, None)
             if saved_facts:
@@ -78,15 +77,12 @@ class MemoryManager:
         except Exception as e:
             print(f"[Dropbox] load failed, starting fresh: {e}")
 
-    async def save(self):
-        convo_path = f"{DROPBOX_BASE}/conversations/{self.today_str}.json"
-        await asyncio.gather(
-            self._async(self._upload_json, FACTS_PATH, self.facts),
-            self._async(self._upload_json, convo_path, self.conversation_history),
-        )
-
     async def save_facts(self):
         await self._async(self._upload_json, FACTS_PATH, self.facts)
+
+    async def save_conversation(self):
+        convo_path = f"{DROPBOX_BASE}/conversations/{self.today_str}.json"
+        await self._async(self._upload_json, convo_path, self.conversation_history)
 
     # ── Memory ops ───────────────────────────────────────────────────────────
 
@@ -156,10 +152,6 @@ class MemoryManager:
     def clear_today(self):
         self.conversation_history = []
         self._message_count = 0
-
-    async def save_conversation(self):
-        convo_path = f"{DROPBOX_BASE}/conversations/{self.today_str}.json"
-        await self._async(self._upload_json, convo_path, self.conversation_history)
 
     @property
     def should_save_conversation(self) -> bool:
