@@ -164,6 +164,22 @@ class ClaudeClient:
         except Exception:
             return {}
 
+    async def ask_bot(self, bot_name: str, query: str, data: dict) -> str:
+        from met_client import BOT_CONFIG
+        config = BOT_CONFIG.get(bot_name, {})
+        context_prompt = config.get("prompt", "")
+        data_text = "\n\n".join(
+            f"### {filename}\n{json.dumps(content, indent=2)}"
+            for filename, content in data.items()
+        )
+        response = await self.client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            system=f"{context_prompt}\n\n## Data\n{data_text}",
+            messages=[{"role": "user", "content": query}],
+        )
+        return next((b.text for b in response.content if hasattr(b, "text")), "[no response]")
+
     async def summarize_day(self, messages: list) -> str:
         if not messages:
             return ""

@@ -14,6 +14,7 @@ from memory import MemoryManager
 from claude_client import ClaudeClient
 from transcribe import transcribe_voice
 from docs import list_documents, fetch_and_parse
+from met_client import BOT_ALIASES, resolve_bot, load_bot_data
 
 load_dotenv()
 logging.basicConfig(
@@ -115,6 +116,35 @@ async def cmd_read(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _process(update, context, f"[Document loaded: {filename}]\n\n{text}")
 
 
+async def _ask_bot(update: Update, context: ContextTypes.DEFAULT_TYPE, bot_name: str, query: str):
+    await context.bot.send_chat_action(update.effective_chat.id, "typing")
+    data = await memory._async(load_bot_data, memory._dbx, bot_name)
+    if not data:
+        await update.message.reply_text(f"Couldn't load data for {bot_name}.")
+        return
+    reply = await claude.ask_bot(bot_name, query, data)
+    await update.message.reply_text(reply)
+
+
+async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text(
+            "Usage: /ask <bot> <query>\nBots: schedulebot, fieldbot, querybot"
+        )
+        return
+    bot_name = BOT_ALIASES.get(args[0].lower())
+    if not bot_name:
+        await update.message.reply_text(
+            f"Unknown bot '{args[0]}'. Options: schedulebot, fieldbot, querybot"
+        )
+        return
+    query = " ".join(args[1:])
+    await _ask_bot(update, context, bot_name, query)
+
+
 async def cmd_reflect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
@@ -181,7 +211,12 @@ async def cmd_holidays(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
-    await _process(update, context, update.message.text)
+    text = update.message.text
+    bot_name = resolve_bot(text)
+    if bot_name:
+        await _ask_bot(update, context, bot_name, text)
+        return
+    await _process(update, context, text)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -192,6 +227,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 HELP_SECTIONS = {
     "journal": (
+        "BOTS\n"
+        "/ask <bot> <query> — query schedulebot, fieldbot, or querybot\n"
+        "\n"
         "JOURNAL\n"
         "/reflect — start an end-of-day reflection\n"
         "/journal <entry> — save a tagged note (use #tags)\n"
@@ -424,6 +462,7 @@ def main():
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("ask", cmd_ask))
     app.add_handler(CommandHandler("reflect", cmd_reflect))
     app.add_handler(CommandHandler("journal", cmd_journal))
     app.add_handler(CommandHandler("log", cmd_log))
