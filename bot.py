@@ -13,6 +13,7 @@ from telegram.ext import (
 from memory import MemoryManager
 from claude_client import ClaudeClient
 from transcribe import transcribe_voice
+from docs import list_documents, fetch_and_parse
 
 load_dotenv()
 logging.basicConfig(
@@ -86,6 +87,34 @@ async def _process(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
         asyncio.create_task(_background_extract())
 
 
+async def cmd_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    docs, err = await memory._async(list_documents, memory._dbx())
+    if err:
+        await update.message.reply_text(err)
+    elif docs:
+        await update.message.reply_text("Docs available:\n" + "\n".join(f"- {d}" for d in docs))
+    else:
+        await update.message.reply_text("No documents found in /CalebBot/documents/")
+
+
+async def cmd_read(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /read <filename>\nUse /docs to see available files.")
+        return
+    filename = " ".join(context.args)
+    await update.message.reply_text(f"Reading {filename}...")
+    await context.bot.send_chat_action(update.effective_chat.id, "typing")
+    text = await memory._async(fetch_and_parse, memory._dbx(), filename)
+    if any(text.startswith(p) for p in ("File not found", "Download error", "Unsupported", "PDF parse error", "Parse error")):
+        await update.message.reply_text(text)
+        return
+    await _process(update, context, f"[Document loaded: {filename}]\n\n{text}")
+
+
 async def cmd_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
@@ -122,6 +151,10 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
     await update.message.reply_text(
+        "DOCUMENTS\n"
+        "/docs — list documents in Dropbox\n"
+        "/read <filename> — load a document into the conversation\n"
+        "\n"
         "INFO\n"
         "/weather — current weather in the San Luis Valley\n"
         "/news — top news stories\n"
@@ -324,6 +357,8 @@ def main():
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("docs", cmd_docs))
+    app.add_handler(CommandHandler("read", cmd_read))
     app.add_handler(CommandHandler("weather", cmd_weather))
     app.add_handler(CommandHandler("news", cmd_news))
     app.add_handler(CommandHandler("holidays", cmd_holidays))
