@@ -132,13 +132,13 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args or len(args) < 2:
         await update.message.reply_text(
-            "Usage: /ask <bot> <query>\nBots: schedulebot, fieldbot, querybot"
+            "Usage: /ask <bot> <query>\nBots: schedulebot, fieldbot, querybot, overview"
         )
         return
     bot_name = BOT_ALIASES.get(args[0].lower())
     if not bot_name:
         await update.message.reply_text(
-            f"Unknown bot '{args[0]}'. Options: schedulebot, fieldbot, querybot"
+            f"Unknown bot '{args[0]}'. Options: schedulebot, fieldbot, querybot, overview"
         )
         return
     query = " ".join(args[1:])
