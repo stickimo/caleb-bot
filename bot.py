@@ -12,6 +12,7 @@ from telegram.ext import (
 )
 from memory import MemoryManager
 from claude_client import ClaudeClient
+from transcribe import transcribe_voice
 
 load_dotenv()
 logging.basicConfig(
@@ -155,6 +156,30 @@ async def cmd_extract(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Nothing new to extract.")
 
 
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    try:
+        voice_file = await update.message.voice.get_file()
+        voice_bytes = await voice_file.download_as_bytearray()
+        transcribed = await transcribe_voice(voice_bytes)
+    except Exception as e:
+        logger.error("Transcription failed: %s", e)
+        await update.message.reply_text("Couldn't transcribe that.")
+        return
+
+    if not transcribed:
+        await update.message.reply_text("Got empty transcription.")
+        return
+
+    # Echo transcription so you know what it heard, then respond
+    await update.message.reply_text(f"_{transcribed}_", parse_mode="Markdown")
+
+    # Reuse text message handler logic
+    update.message.text = transcribed
+    await handle_message(update, context)
+
+
 # ── Init ─────────────────────────────────────────────────────────────────────
 
 
@@ -200,6 +225,7 @@ def main():
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("extract", cmd_extract))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 
     logger.info("Starting polling...")
     app.run_polling(drop_pending_updates=True)

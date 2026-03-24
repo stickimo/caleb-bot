@@ -1,4 +1,5 @@
 import json
+import os
 from anthropic import AsyncAnthropic
 from memory import MemoryManager
 
@@ -6,7 +7,9 @@ SYSTEM_PROMPT = """You're talking to Caleb. He's a geotechnical field/lab tech i
 
 Style: Be direct and concise. Skip preambles, summaries of what he just said, and "that's a great question" type filler. Dry humor is welcome. Don't hedge everything with caveats. Don't ask if he wants to explore something further — if you have something worth saying, say it. Match his register — he's sharp and talks like a normal person, not a LinkedIn post.
 
-When he's working through ideas, engage like a peer who happens to know a lot, not like a coach or advisor. Push back when something doesn't hold up. Don't moralize."""
+When he's working through ideas, engage like a peer who happens to know a lot, not like a coach or advisor. Push back when something doesn't hold up. Don't moralize.
+
+You have access to a web_search tool. Use it when the question requires current information, recent events, prices, weather, or anything time-sensitive. Don't use it for general knowledge you already have."""
 
 EXTRACTION_PROMPT = """Review this conversation and extract any facts worth remembering long-term about Caleb: his projects, decisions, preferences, or anything specific and useful. Return ONLY valid JSON:
 {
@@ -18,11 +21,29 @@ Only include genuinely new, specific facts. Skip anything vague or already obvio
 
 SUMMARY_PROMPT = """Summarize this conversation in 3-5 bullet points. Focus on specific facts, decisions, topics discussed, and anything actionable or worth remembering. Be concrete. No filler. Return plain text bullets only."""
 
+WEB_SEARCH_TOOL = [
+    {
+        "name": "web_search",
+        "description": "Search the web for current information. Use for news, prices, weather, recent events, or anything that may have changed recently.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query",
+                }
+            },
+            "required": ["query"],
+        },
+    }
+]
+
 
 class ClaudeClient:
     def __init__(self, api_key: str, memory: MemoryManager):
         self.client = AsyncAnthropic(api_key=api_key)
         self.memory = memory
+        self._tavily_key = os.getenv("TAVILY_API_KEY")
 
     def _system_prompt(self) -> str:
         parts = [SYSTEM_PROMPT]
@@ -34,18 +55,52 @@ class ClaudeClient:
             parts.append(f"## Recent Session Summaries\n{summaries_text}")
         return "\n\n".join(parts)
 
+    async def _web_search(self, query: str) -> str:
+        if not self._tavily_key:
+            return "Web search is not configured."
+        try:
+            from tavily import AsyncTavilyClient
+            client = AsyncTavilyClient(api_key=self._tavily_key)
+            results = await client.search(query, max_results=5)
+            lines = []
+            for r in results.get("results", []):
+                lines.append(f"{r['title']}\n{r['content']}\n{r['url']}")
+            return "\n\n".join(lines) or "No results found."
+        except Exception as e:
+            return f"Search failed: {e}"
+
     async def chat(self, user_message: str) -> str:
         self.memory.add_message("user", user_message)
-        messages = self.memory.get_context_messages(20)
+        # Work on a copy so tool-use intermediate messages don't pollute history
+        messages = list(self.memory.get_context_messages(20))
 
-        response = await self.client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2048,
-            system=self._system_prompt(),
-            messages=messages,
-        )
+        tools = WEB_SEARCH_TOOL if self._tavily_key else []
 
-        reply = response.content[0].text
+        while True:
+            response = await self.client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=2048,
+                system=self._system_prompt(),
+                messages=messages,
+                tools=tools or None,
+            )
+
+            if response.stop_reason == "tool_use":
+                tool_block = next(b for b in response.content if b.type == "tool_use")
+                search_results = await self._web_search(tool_block.input["query"])
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_block.id,
+                        "content": search_results,
+                    }],
+                })
+            else:
+                break
+
+        reply = next(b.text for b in response.content if hasattr(b, "text"))
         self.memory.add_message("assistant", reply)
         return reply
 
@@ -62,12 +117,10 @@ class ClaudeClient:
         response = await self.client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=512,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"{EXTRACTION_PROMPT}\n\nConversation:\n{convo_text}",
-                }
-            ],
+            messages=[{
+                "role": "user",
+                "content": f"{EXTRACTION_PROMPT}\n\nConversation:\n{convo_text}",
+            }],
         )
 
         try:
