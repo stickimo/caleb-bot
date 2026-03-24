@@ -177,7 +177,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Echo transcription so you know what it heard, then respond
-    await update.message.reply_text(f"_{transcribed}_", parse_mode="Markdown")
+    await update.message.reply_text(f"[voice] {transcribed}")
     await _process(update, context, transcribed)
 
 
