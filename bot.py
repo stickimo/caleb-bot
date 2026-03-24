@@ -98,6 +98,19 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Ready.")
 
 
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    await update.message.reply_text(
+        "/memory — show everything stored about you\n"
+        "/remember [category] fact — save a fact (categories: projects, preferences, notes)\n"
+        "/forget <exact fact> — remove a fact\n"
+        "/extract — manually trigger fact extraction from recent conversation\n"
+        "/clear — wipe today's conversation history (extracts facts first)\n"
+        "/help — show this list"
+    )
+
+
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
@@ -225,6 +238,7 @@ def main():
     )
 
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("remember", cmd_remember))
     app.add_handler(CommandHandler("forget", cmd_forget))
