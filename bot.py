@@ -86,6 +86,26 @@ async def _process(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
         asyncio.create_task(_background_extract())
 
 
+async def cmd_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    await _process(update, context, "What's the current weather in the San Luis Valley, CO?")
+
+
+async def cmd_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    await _process(update, context, "What are the top news stories right now? Give me a brief rundown.")
+
+
+async def cmd_holidays(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    from datetime import date
+    today = date.today().strftime("%B %d, %Y")
+    await _process(update, context, f"Today is {today}. Are there any US holidays today or in the next few days?")
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
@@ -102,6 +122,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
     await update.message.reply_text(
+        "/weather — current weather in the San Luis Valley\n"
+        "/news — top news stories right now\n"
+        "/holidays — US holidays around today's date\n"
         "/memory — show all stored facts\n"
         "/status — fact counts and session info\n"
         "/summary — recent daily summaries\n"
@@ -297,6 +320,9 @@ def main():
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("weather", cmd_weather))
+    app.add_handler(CommandHandler("news", cmd_news))
+    app.add_handler(CommandHandler("holidays", cmd_holidays))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("summary", cmd_summary))
     app.add_handler(CommandHandler("search", cmd_search))
