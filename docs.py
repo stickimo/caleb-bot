@@ -1,4 +1,5 @@
 import io
+import os
 import dropbox
 from dropbox.exceptions import ApiError
 
@@ -6,16 +7,27 @@ DOCS_PATH = "/CalebBot/documents"
 MAX_CHARS = 60000  # ~15k tokens — leaves plenty of room for conversation
 
 
-def list_documents(dbx: dropbox.Dropbox) -> tuple[list[str], str | None]:
+def _fresh_client() -> dropbox.Dropbox:
+    """Create a fresh Dropbox client to avoid shared-state auth issues."""
+    return dropbox.Dropbox(
+        oauth2_refresh_token=os.environ["DROPBOX_REFRESH_TOKEN"],
+        app_key=os.environ["DROPBOX_APP_KEY"],
+        app_secret=os.environ["DROPBOX_APP_SECRET"],
+    )
+
+
+def list_documents(_unused=None) -> tuple[list[str], str | None]:
     """Returns (filenames, error_message). error_message is None on success."""
     try:
+        dbx = _fresh_client()
         result = dbx.files_list_folder(DOCS_PATH)
         return sorted(e.name for e in result.entries if hasattr(e, "name")), None
     except Exception as e:
         return [], f"Error listing {DOCS_PATH}: {e}"
 
 
-def fetch_and_parse(dbx: dropbox.Dropbox, filename: str) -> str:
+def fetch_and_parse(_unused, filename: str) -> str:
+    dbx = _fresh_client()
     path = f"{DOCS_PATH}/{filename}"
     try:
         _, res = dbx.files_download(path)
