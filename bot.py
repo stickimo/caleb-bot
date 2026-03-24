@@ -182,7 +182,11 @@ async def cmd_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     docs, err = await memory._async(list_documents)
     if err:
-        await update.message.reply_text(err)
+        await update.message.reply_text(
+            "Can't list documents (Dropbox scope issue).\n"
+            "Use /read <filename> directly — e.g.:\n"
+            "/read WAQTC Manual.pdf"
+        )
     elif docs:
         await update.message.reply_text("Docs available:\n" + "\n".join(f"- {d}" for d in docs))
     else:
