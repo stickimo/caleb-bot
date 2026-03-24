@@ -11,13 +11,19 @@ When he's working through ideas, engage like a peer who happens to know a lot, n
 
 You have access to a web_search tool. Use it when the question requires current information, recent events, prices, weather, or anything time-sensitive. Don't use it for general knowledge you already have."""
 
-EXTRACTION_PROMPT = """Review this conversation and extract any facts worth remembering long-term about Caleb: his projects, decisions, preferences, or anything specific and useful. Return ONLY valid JSON:
+EXTRACTION_PROMPT = """Review this conversation and extract any facts worth remembering long-term about Caleb. Return ONLY valid JSON:
 {
   "projects": [],
   "preferences": [],
-  "notes": []
+  "notes": [],
+  "wellbeing": []
 }
-Only include genuinely new, specific facts. Skip anything vague or already obvious from the base context. Empty lists are fine. No explanation, just JSON."""
+Guidelines:
+- projects: specific work, build tasks, goals, decisions made
+- preferences: how he likes things done, tools he uses, opinions
+- notes: anything specific and useful that doesn't fit elsewhere
+- wellbeing: emotional state, energy level, stress, mood, mental patterns — only if clearly expressed, not inferred. Be specific ("feeling behind on exam prep", "good flow state on the build today") not generic ("seems stressed").
+Only include genuinely new, specific facts. Empty lists are fine. No explanation, just JSON."""
 
 SUMMARY_PROMPT = """Summarize this conversation in 3-5 bullet points. Focus on specific facts, decisions, topics discussed, and anything actionable or worth remembering. Be concrete. No filler. Return plain text bullets only."""
 

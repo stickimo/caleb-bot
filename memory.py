@@ -21,6 +21,7 @@ DEFAULT_FACTS = {
     "projects": [],
     "preferences": [],
     "notes": [],
+    "wellbeing": [],
     "summaries": [],  # [{"date": "YYYY-MM-DD", "text": "..."}]
 }
 

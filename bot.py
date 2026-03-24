@@ -266,7 +266,7 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_wipe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
-    known = {"projects", "preferences", "notes", "about_caleb"}
+    known = {"projects", "preferences", "notes", "about_caleb", "wellbeing"}
     if not context.args or context.args[0] not in known:
         await update.message.reply_text(
             "Usage: /wipe <category>\nCategories: projects, preferences, notes, about_caleb"
@@ -295,7 +295,7 @@ async def cmd_remember(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    known = {"projects", "preferences", "notes", "about_caleb"}
+    known = {"projects", "preferences", "notes", "about_caleb", "wellbeing"}
     if args[0] in known and len(args) > 1:
         category, fact = args[0], " ".join(args[1:])
     else:
