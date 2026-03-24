@@ -122,19 +122,23 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
     await update.message.reply_text(
+        "INFO\n"
         "/weather — current weather in the San Luis Valley\n"
-        "/news — top news stories right now\n"
-        "/holidays — US holidays around today's date\n"
+        "/news — top news stories\n"
+        "/holidays — US holidays around today\n"
+        "\n"
+        "MEMORY\n"
         "/memory — show all stored facts\n"
         "/status — fact counts and session info\n"
         "/summary — recent daily summaries\n"
         "/search <term> — search stored facts\n"
-        "/remember [category] fact — save a fact (categories: projects, preferences, notes)\n"
+        "\n"
+        "MANAGE\n"
+        "/remember [category] fact — save a fact\n"
         "/forget <exact fact> — remove a fact\n"
-        "/wipe <category> — clear all facts in a category\n"
-        "/extract — manually trigger fact extraction\n"
-        "/clear — wipe today's conversation history (extracts facts first)\n"
-        "/help — show this list"
+        "/wipe <category> — clear a category\n"
+        "/extract — trigger fact extraction\n"
+        "/clear — wipe today's conversation"
     )
 
 
