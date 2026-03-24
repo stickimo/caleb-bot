@@ -239,6 +239,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _run_bot_query(chat_id, bot_name, query_text, context)
         return
 
+    # Document load
+    if data.startswith("read:"):
+        filename = data[5:]
+        await context.bot.send_message(chat_id, f"Reading {filename}...")
+        await context.bot.send_chat_action(chat_id, "typing")
+        text = await memory._async(fetch_and_parse, memory._dbx(), filename)
+        if any(text.startswith(p) for p in ("File not found", "Download error", "Unsupported", "PDF parse error", "Parse error")):
+            await context.bot.send_message(chat_id, text)
+            return
+        await _process_chat(chat_id, context, f"[Document loaded: {filename}]\n\n{text}")
+        return
+
     # Direct commands
     if data.startswith("c:"):
         cmd = data[2:]
@@ -269,7 +281,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if err:
                 await context.bot.send_message(chat_id, err)
             elif docs:
-                await context.bot.send_message(chat_id, "Docs available:\n" + "\n".join(f"/read {d}" for d in docs))
+                buttons = [[InlineKeyboardButton(d, callback_data=f"read:{d}")] for d in docs]
+                await context.bot.send_message(
+                    chat_id, "Tap a document to load it:",
+                    reply_markup=InlineKeyboardMarkup(buttons)
+                )
             else:
                 await context.bot.send_message(chat_id, "No documents found in /CalebBot/documents/")
         elif cmd == "log":
