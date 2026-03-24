@@ -593,6 +593,7 @@ def main():
 
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("help",     cmd_help))
+    app.add_handler(CommandHandler("menu",     cmd_help))
     app.add_handler(CommandHandler("ask",      cmd_ask))
     app.add_handler(CommandHandler("reflect",  cmd_reflect))
     app.add_handler(CommandHandler("journal",  cmd_journal))
